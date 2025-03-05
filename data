@@ -1,0 +1,124 @@
+import gdown
+import json
+import sqlite3
+import pandas as pd
+
+
+# Replace with your actual file ID
+file_id = "1spyHGRWMEAh5V2u1S3Xtigi6ZbTKETP2"
+url = f"https://drive.google.com/uc?id={file_id}"
+
+# Download the file
+output = "data.json"
+gdown.download(url, output, quiet=False)
+
+# Load JSON file
+with open(output, "r") as f:
+    data = json.load(f)
+
+# Extract professionals list
+professionals = data["professionals"]
+
+# Initialize lists for different tables
+professionals_data = []
+jobs_data = []
+skills_data = []
+certifications_data = []
+education_data = []
+career_progression_data = []
+
+# Process data
+for professional in professionals:
+    # Professionals table
+    professionals_data.append({
+        "professional_id": professional["professional_id"],
+        "years_experience": professional["years_experience"],
+        "current_industry": professional["current_industry"],
+        "current_role": professional["current_role"],
+        "education_level": professional["education_level"]
+    })
+
+    # Jobs table
+    prev_job = None
+    for job in professional.get("jobs", []):
+        jobs_data.append({
+            "job_id": job["job_id"],
+            "professional_id": professional["professional_id"],
+            "company": job["company"],
+            "industry": job["industry"],
+            "role": job["role"],
+            "start_date": job["start_date"],
+            "end_date": job["end_date"],
+            "salary_band": job["salary_band"]
+        })
+
+        # Create career progression fact table entries
+        if prev_job:
+            industry_change = prev_job["industry"] != job["industry"]
+            career_progression_data.append({
+                "professional_id": professional["professional_id"],
+                "previous_role": prev_job["role"],
+                "new_role": job["role"],
+                "industry_change": industry_change,
+                "time_in_role_months": pd.to_datetime(job["start_date"], errors='coerce').year * 12 +
+                                       pd.to_datetime(job["start_date"], errors='coerce').month -
+                                       (pd.to_datetime(prev_job["start_date"], errors='coerce').year * 12 +
+                                        pd.to_datetime(prev_job["start_date"], errors='coerce').month),
+                "salary_growth": job["salary_band"] - prev_job["salary_band"]
+            })
+        prev_job = job
+
+    # Skills table
+    for skill in professional.get("skills", []):
+        skills_data.append({
+            "skill_id": skill["skill_id"],
+            "professional_id": professional["professional_id"],
+            "skill_name": skill["skill_name"],
+            "proficiency_level": skill["proficiency_level"],
+            "years_experience": skill["years_experience"]
+        })
+
+    # Certifications table
+    for cert in professional.get("certifications", []):
+        certifications_data.append({
+            "certification_id": cert["certification_id"],
+            "professional_id": professional["professional_id"],
+            "certification_name": cert["certification_name"],
+            "issuing_organization": cert["issuing_organization"],
+            "date_earned": cert["date_earned"],
+            "expiration_date": cert["expiration_date"]
+        })
+
+    # Education table
+    for edu in professional.get("education", []):
+        education_data.append({
+            "education_id": edu["education_id"],
+            "professional_id": professional["professional_id"],
+            "degree": edu["degree"],
+            "institution": edu["institution"],
+            "field_of_study": edu["field_of_study"],
+            "graduation_date": edu["graduation_date"]
+        })
+
+# Convert lists to DataFrames
+df_professionals = pd.DataFrame(professionals_data)
+df_jobs = pd.DataFrame(jobs_data)
+df_skills = pd.DataFrame(skills_data)
+df_certifications = pd.DataFrame(certifications_data)
+df_education = pd.DataFrame(education_data)
+df_career_progression = pd.DataFrame(career_progression_data)
+
+# Export to SQLite
+db_path = "/mnt/data/career_analytics.db"
+conn = sqlite3.connect(db_path)
+
+df_professionals.to_sql("professionals", conn, if_exists="replace", index=False)
+df_jobs.to_sql("jobs", conn, if_exists="replace", index=False)
+df_skills.to_sql("skills", conn, if_exists="replace", index=False)
+df_certifications.to_sql("certifications", conn, if_exists="replace", index=False)
+df_education.to_sql("education", conn, if_exists="replace", index=False)
+df_career_progression.to_sql("career_progression_fact", conn, if_exists="replace", index=False)
+
+conn.close()
+
+print("Data successfully exported to SQLite database.")
